@@ -1,0 +1,33 @@
+{
+  "name": "@anyhook/cloudflare",
+  "version": "0.1.0",
+  "description": "Cloudflare adapter for anyhook: Cloudflare Queues transport + per-endpoint Durable Object state + Alarms scheduler",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external cloudflare:workers && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@anyhook/core": "workspace:*",
+    "@anyhook/signing": "workspace:*"
+  },
+  "peerDependencies": { "@anyhook/core": "workspace:*" },
+  "devDependencies": {
+    "@anyhook/testing": "workspace:*",
+    "@cloudflare/workers-types": "^5.0.0",
+    "@types/bun": "^1.1.0",
+    "miniflare": "^4.0.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": ["anyhook", "cloudflare", "workers", "durable-objects", "webhooks"],
+  "license": "MIT",
+  "author": "Shantanu Sharma",
+  "publishConfig": { "access": "public" }
+}
