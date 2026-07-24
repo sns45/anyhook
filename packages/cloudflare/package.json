@@ -1,6 +1,6 @@
 {
   "name": "@anyhook/cloudflare",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Cloudflare adapter for anyhook: Cloudflare Queues transport + per-endpoint Durable Object state + Alarms scheduler",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,6 +1,6 @@
 {
   "name": "@anyhook/aws",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "AWS adapter for anyhook: SQS transport + single-table DynamoDB state + due_at-GSI scheduler with a fixed-interval sweeper",
   "type": "module",
   "main": "./dist/index.js",
