@@ -115,6 +115,7 @@ export const attemptSk = (messageId: string, seq: number): string => `ATT#${mess
 export const attemptSkPrefix = (messageId: string): string => `ATT#${messageId}#`;
 export const attemptCounterSk = (messageId: string): string => `ATTCOUNT#${messageId}`;
 export const circuitSk = (endpointId: string): string => `CIRCUIT#${endpointId}`;
+export const rateSk = (endpointId: string): string => `RATE#${endpointId}`;
 export const dlqSk = (seq: number): string => `DLQ#${String(seq).padStart(16, '0')}`;
 export const dlqCounterSk = (): string => 'DLQSEQ';
 export const idemSk = (idemKey: string): string => `IDEM#${idemKey}`;

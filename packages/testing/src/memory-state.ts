@@ -10,6 +10,7 @@ import {
   type Attempt,
   type DlqReason,
   type Clock,
+  type RateBucket,
 } from '@anyhook/core';
 import { generateSecret } from '@anyhook/signing';
 
@@ -23,11 +24,12 @@ interface TenantData {
   messages: Map<string, Message>;
   attempts: Map<string, Attempt[]>;
   circuits: Map<string, CircuitRecord>;
+  rateBuckets: Map<string, RateBucket>;
   dlq: { message: Message; reason: DlqReason }[];
 }
 
 function newTenant(): TenantData {
-  return { events: new Map(), endpoints: new Map(), messages: new Map(), attempts: new Map(), circuits: new Map(), dlq: [] };
+  return { events: new Map(), endpoints: new Map(), messages: new Map(), attempts: new Map(), circuits: new Map(), rateBuckets: new Map(), dlq: [] };
 }
 
 let endpointCounter = 0;
@@ -165,6 +167,14 @@ export class MemoryStateStore implements StateStore {
 
   async putCircuit(tenant: string, endpointId: string, rec: CircuitRecord): Promise<void> {
     this.t(tenant).circuits.set(endpointId, { ...rec });
+  }
+
+  async getRateBucket(tenant: string, endpointId: string): Promise<RateBucket | null> {
+    return this.t(tenant).rateBuckets.get(endpointId) ?? null;
+  }
+
+  async putRateBucket(tenant: string, endpointId: string, bucket: RateBucket): Promise<void> {
+    this.t(tenant).rateBuckets.set(endpointId, { ...bucket });
   }
 
   async addToDlq(m: Message, reason: DlqReason): Promise<void> {

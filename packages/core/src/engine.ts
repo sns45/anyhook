@@ -16,6 +16,7 @@ import type { RetryConfig, CircuitConfig } from './types/config.js';
 import { DEFAULT_SCHEDULE_MS, nextDelayMs } from './policy/retry.js';
 import { fullJitter } from './policy/jitter.js';
 import { DEFAULT_FAILURE_THRESHOLD, DEFAULT_COOLDOWN_MS, canAttempt, toHalfOpen, onSuccess, onFailure } from './policy/circuit.js';
+import { consumeToken, initialBucket } from './policy/ratelimit.js';
 import { deriveIdempotencyKey, newId } from './id.js';
 import { fanout } from './fanout.js';
 import { deliverOnce } from './deliver.js';
@@ -144,6 +145,21 @@ export class WebhookEngine {
       };
       await this.dlq(m, goneAttempt, 'endpoint_gone');
       return;
+    }
+
+    // Rate-limit gate (§10). Checked BEFORE the circuit so a throttle never mutates circuit state.
+    // Throttling reschedules the message without consuming a delivery attempt — never drops it.
+    if (endpoint.rateLimit && endpoint.rateLimit > 0) {
+      const now = this.clock.now();
+      const bucket = (await this.state.getRateBucket(m.tenant, m.endpointId)) ?? initialBucket(endpoint.rateLimit, now);
+      const decision = consumeToken(bucket, endpoint.rateLimit, now);
+      await this.state.putRateBucket(m.tenant, m.endpointId, decision.bucket);
+      if (!decision.allowed) {
+        const at = now + decision.retryAfterMs;
+        await this.state.putMessage({ ...m, status: 'retrying', nextAttemptAt: at });
+        await this.scheduler.scheduleRetry(m, at);
+        return;
+      }
     }
 
     // Circuit gate (normalize cooldown to engine config).

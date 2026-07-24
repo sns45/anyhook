@@ -27,3 +27,11 @@ export interface CircuitRecord {
   /** Cooldown before an `open` circuit transitions to `half-open`. */
   cooldownMs: number;
 }
+
+/** Per-endpoint token-bucket rate-limit state (lives in the durable StateStore). */
+export interface RateBucket {
+  /** Available delivery tokens (fractional). */
+  tokens: number;
+  /** Epoch ms the bucket was last refilled. */
+  lastRefillMs: number;
+}

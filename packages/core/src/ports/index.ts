@@ -1,6 +1,6 @@
 /** @fileoverview Runtime ports (interfaces) implemented by adapters. Core imports NO runtime SDK. @module @anyhook/core */
 
-import type { Endpoint, CircuitRecord } from '../types/endpoint.js';
+import type { Endpoint, CircuitRecord, RateBucket } from '../types/endpoint.js';
 import type { Message, MessageStatus } from '../types/message.js';
 import type { Attempt, DlqReason } from '../types/attempt.js';
 
@@ -106,6 +106,10 @@ export interface StateStore {
 
   getCircuit(tenant: string, endpointId: string): Promise<CircuitRecord>;
   putCircuit(tenant: string, endpointId: string, rec: CircuitRecord): Promise<void>;
+
+  /** Per-endpoint rate-limit token bucket (§10). `null` when never set (caller seeds a full bucket). */
+  getRateBucket(tenant: string, endpointId: string): Promise<RateBucket | null>;
+  putRateBucket(tenant: string, endpointId: string, bucket: RateBucket): Promise<void>;
 
   addToDlq(m: Message, reason: DlqReason): Promise<void>;
   listDlq(tenant: string, endpointId?: string): Promise<{ message: Message; reason: DlqReason }[]>;

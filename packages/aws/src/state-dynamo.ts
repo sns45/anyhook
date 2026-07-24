@@ -11,6 +11,7 @@ import {
   type Message,
   type Attempt,
   type DlqReason,
+  type RateBucket,
 } from '@anyhook/core';
 import { generateSecret } from '@anyhook/signing';
 import {
@@ -22,6 +23,7 @@ import {
   attemptSkPrefix,
   attemptCounterSk,
   circuitSk,
+  rateSk,
   dlqSk,
   dlqCounterSk,
   idemSk,
@@ -277,6 +279,26 @@ export class DynamoStateStore implements StateStore {
       if (isConditionalCheckFailed(e)) throw new CircuitWriteConflictError(tenant, endpointId);
       throw e;
     }
+  }
+
+  // ---- rate limiting (§10) ----
+
+  async getRateBucket(tenant: string, endpointId: string): Promise<RateBucket | null> {
+    const res = await this.env.ddb.send(
+      new GetCommand({ TableName: this.env.tableName, Key: { PK: tenantPk(tenant), SK: rateSk(endpointId) } }),
+    );
+    return res.Item ? stripKeys<RateBucket>(res.Item) : null;
+  }
+
+  async putRateBucket(tenant: string, endpointId: string, bucket: RateBucket): Promise<void> {
+    // Approximate limiter: a plain put is sufficient (no OCC needed — a lost update at most lets one
+    // extra delivery through, which throttling tolerates).
+    await this.env.ddb.send(
+      new PutCommand({
+        TableName: this.env.tableName,
+        Item: { PK: tenantPk(tenant), SK: rateSk(endpointId), ...bucket },
+      }),
+    );
   }
 
   // ---- DLQ ----

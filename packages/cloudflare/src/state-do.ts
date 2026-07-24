@@ -7,6 +7,7 @@ import type {
   Message,
   Attempt,
   DlqReason,
+  RateBucket,
 } from '@anyhook/core';
 import { endpointDoName, type Env } from './env.js';
 
@@ -116,6 +117,14 @@ export class DoStateStore implements StateStore {
 
   async putCircuit(tenant: string, endpointId: string, rec: CircuitRecord): Promise<void> {
     await this.endpointStub(tenant, endpointId).putCircuit(rec);
+  }
+
+  async getRateBucket(tenant: string, endpointId: string): Promise<RateBucket | null> {
+    return this.endpointStub(tenant, endpointId).getRateBucket();
+  }
+
+  async putRateBucket(tenant: string, endpointId: string, bucket: RateBucket): Promise<void> {
+    await this.endpointStub(tenant, endpointId).putRateBucket(bucket);
   }
 
   async addToDlq(m: Message, reason: DlqReason): Promise<void> {

@@ -7,6 +7,7 @@ import {
   type CircuitRecord,
   type DlqReason,
   type DeliveryQuery,
+  type RateBucket,
 } from '@anyhook/core';
 import type { Env } from './env.js';
 
@@ -15,6 +16,7 @@ const ATTEMPT_PREFIX = 'att:';
 const DLQ_PREFIX = 'dlq:';
 const SCHED_PREFIX = 'sched:';
 const CIRCUIT_KEY = 'circuit';
+const RATE_KEY = 'rate';
 const DLQ_SEQ_KEY = 'dlqSeq';
 
 interface DlqRow {
@@ -81,6 +83,14 @@ export class EndpointDurableObject extends DurableObject<Env> {
 
   async putCircuit(rec: CircuitRecord): Promise<void> {
     await this.ctx.storage.put(CIRCUIT_KEY, rec);
+  }
+
+  async getRateBucket(): Promise<RateBucket | null> {
+    return (await this.ctx.storage.get<RateBucket>(RATE_KEY)) ?? null;
+  }
+
+  async putRateBucket(bucket: RateBucket): Promise<void> {
+    await this.ctx.storage.put(RATE_KEY, bucket);
   }
 
   async addToDlq(m: Message, reason: DlqReason): Promise<void> {
