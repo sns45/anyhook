@@ -2,6 +2,7 @@ package testing
 
 import (
 	"context"
+	"sync"
 
 	"github.com/sns45/anyhook/go/core"
 )
@@ -68,6 +69,7 @@ type MockReceiver struct {
 	Default Script
 	Calls   []RecordedCall
 
+	mu       sync.Mutex
 	clock    core.Clock
 	routes   map[string]Script
 	counters map[string]int
@@ -86,12 +88,17 @@ func NewMockReceiver(clock core.Clock) *MockReceiver {
 
 // On routes url to script. Returns the receiver for chaining.
 func (r *MockReceiver) On(url string, script Script) *MockReceiver {
+	r.mu.Lock()
 	r.routes[url] = script
+	r.mu.Unlock()
 	return r
 }
 
 // Post implements core.HTTPClient.
 func (r *MockReceiver) Post(_ context.Context, url string, body string, headers map[string]string, timeoutMs int64) core.HTTPResult {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	ts := int64(0)
 	if r.clock != nil {
 		ts = r.clock.Now()
@@ -131,6 +138,8 @@ func (r *MockReceiver) Post(_ context.Context, url string, body string, headers 
 
 // CallCount returns the total number of calls, or the count for url if given (non-empty).
 func (r *MockReceiver) CallCount(url string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if url == "" {
 		return len(r.Calls)
 	}

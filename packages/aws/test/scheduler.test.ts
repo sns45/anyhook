@@ -7,7 +7,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import type { Message } from '@anyhook/core';
 import { DynamoScheduler } from '../src/scheduler.js';
 import { runSweeper } from '../src/sweeper.js';
-import { tenantPk, schedSk, SCHED_GSI_PK, type Env } from '../src/config.js';
+import { tenantPk, schedSk, SCHED_GSI_PK, SWEEPER_LEASE_SECONDS, type Env } from '../src/config.js';
 import { createFakeDynamo, conditionalCheckFailed } from './fake-dynamo.js';
 
 const { ddbMock, table, keyOf } = createFakeDynamo();
@@ -126,14 +126,39 @@ describe('runSweeper: conditional-write claim before send (D2/ADR-0001)', () => 
     expect(sqsMock.commandCalls(SendMessageCommand).length).toBe(0);
   });
 
-  test('a row already marked claimed (by a prior/concurrent run) is skipped entirely: no re-claim, no re-send', async () => {
+  test('a row with a still-valid lease (claimed recently) is skipped entirely: no re-claim, no re-send', async () => {
     const nowMs = 2_000_000_000;
     const m = makeMessage({ tenant: 'tenant-a' });
-    seedDueRow('tenant-a', m, Math.floor(nowMs / 1000) - 10, { claimed: true });
+    // claimed_at == now → lease is fresh, well within SWEEPER_LEASE_SECONDS
+    seedDueRow('tenant-a', m, Math.floor(nowMs / 1000) - 10, { claimed_at: Math.floor(nowMs / 1000) });
 
     const result = await runSweeper(env, nowMs);
     expect(result).toEqual({ due: 0, claimed: 0, sent: 0 });
     expect(sqsMock.commandCalls(SendMessageCommand).length).toBe(0);
+  });
+
+  test('lease recovery (G5): a claim whose SendMessage failed is re-swept and re-enqueued after the lease expires', async () => {
+    const m = makeMessage({ tenant: 'tenant-a' });
+    const t0 = 2_000_000_000;
+    seedDueRow('tenant-a', m, Math.floor(t0 / 1000) - 10);
+
+    // First sweep: claim succeeds, but SQS throws → runSweeper propagates; the row keeps its lease.
+    sqsMock.on(SendMessageCommand).rejects(new Error('SQS throttled'));
+    await expect(runSweeper(env, t0)).rejects.toThrow(/throttled/);
+    const row = table.get(keyOf(tenantPk('tenant-a'), schedSk(m.messageId)));
+    expect(row).toBeDefined(); // NOT lost — still present, lease-held
+    expect(typeof row!.claimed_at).toBe('number');
+
+    // Before the lease expires: still skipped (no duplicate claim).
+    sqsMock.on(SendMessageCommand).resolves({ MessageId: 'ok' });
+    expect((await runSweeper(env, t0 + 60_000)).sent).toBe(0);
+
+    // After the lease expires: re-claimed and finally enqueued (retry recovered, never dropped).
+    const afterLease = t0 + (SWEEPER_LEASE_SECONDS + 5) * 1000;
+    const recovered = await runSweeper(env, afterLease);
+    expect(recovered).toEqual({ due: 1, claimed: 1, sent: 1 });
+    expect(sqsMock.commandCalls(SendMessageCommand).length).toBeGreaterThanOrEqual(1);
+    expect(table.has(keyOf(tenantPk('tenant-a'), schedSk(m.messageId)))).toBe(false); // cleaned up
   });
 
   test('losing the claim race (ConditionalCheckFailedException on the claim UpdateItem) does not double-send', async () => {

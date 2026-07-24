@@ -13,11 +13,17 @@ alias, e.g. `anyhooktesting "github.com/sns45/anyhook/go/testing"`.
 */
 package testing
 
-import "github.com/sns45/anyhook/go/core"
+import (
+	"sync"
+
+	"github.com/sns45/anyhook/go/core"
+)
 
 // TestClock is a Clock whose time only advances when the test tells it to.
+// It is safe for concurrent use so it can back the engine under parallel workers.
 type TestClock struct {
-	t int64
+	mu sync.Mutex
+	t  int64
 }
 
 // NewTestClock builds a TestClock starting at the given epoch-ms time.
@@ -26,16 +32,24 @@ func NewTestClock(start int64) *TestClock {
 }
 
 // Now implements core.Clock.
-func (c *TestClock) Now() int64 { return c.t }
+func (c *TestClock) Now() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
 
 // Tick advances the clock by ms and returns the new time.
 func (c *TestClock) Tick(ms int64) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.t += ms
 	return c.t
 }
 
 // Set jumps to an absolute time. Never moves backwards.
 func (c *TestClock) Set(ms int64) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if ms > c.t {
 		c.t = ms
 	}
@@ -44,9 +58,10 @@ func (c *TestClock) Set(ms int64) int64 {
 
 var _ core.Clock = (*TestClock)(nil)
 
-// seededRng is a deterministic LCG Rng in [0, 1).
+// seededRng is a deterministic LCG Rng in [0, 1), safe for concurrent use.
 type seededRng struct {
-	s uint32
+	mu sync.Mutex
+	s  uint32
 }
 
 // SeededRng returns a deterministic LCG-backed Rng in [0, 1). A seed of 0
@@ -60,6 +75,8 @@ func SeededRng(seed uint32) core.Rng {
 
 // Next implements core.Rng.
 func (r *seededRng) Next() float64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.s = r.s*1664525 + 1013904223
 	return float64(r.s) / 4294967296.0
 }

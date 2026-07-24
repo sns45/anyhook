@@ -14,6 +14,21 @@ export const SQS_MAX_DELAY_MS = 900_000;
 export const SCHED_TTL_GRACE_SECONDS = 7 * 24 * 60 * 60;
 
 /**
+ * Lease duration (seconds) for a sweeper claim. A claim stamps `claimed_at`; a row whose claim is
+ * older than this is re-claimable. This makes the claim crash/failure-safe: if `SendMessage` throws
+ * after a successful claim, the lease expires and a later sweep re-enqueues the retry rather than
+ * losing it (G5). Must exceed the sweep interval (60s) so an in-flight claim isn't re-swept early.
+ */
+export const SWEEPER_LEASE_SECONDS = 300;
+
+/**
+ * Max event payload for the AWS runtime. The SQS message body is `JSON.stringify(Message)` — the
+ * payload PLUS the envelope (ids, tenant, timestamps) — and SQS caps a body at 256KB. Cap the
+ * payload below that (≈200KB) so a near-limit payload plus envelope still fits and enqueues.
+ */
+export const AWS_MAX_PAYLOAD_BYTES = 200 * 1024;
+
+/**
  * Deploy-time configuration for the AWS adapter. `tableName`/`queueUrl` name the single DynamoDB
  * table and SQS queue this adapter owns. SDK clients can be pre-built and injected — required for
  * tests (`aws-sdk-client-mock`) and useful for LocalStack (`endpoint`) or a custom credential chain.

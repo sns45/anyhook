@@ -1,15 +1,15 @@
-/** @fileoverview runSweeper: fixed-interval discovery of due SCHED# rows via the due_at GSI, claimed via a conditional write before enqueueing (D2/ADR-0001, P2). @module @anyhook/aws */
+/** @fileoverview runSweeper: fixed-interval discovery of due SCHED# rows via the due_at GSI, claimed via a lease before enqueueing (D2/ADR-0001, P2). @module @anyhook/aws */
 import { QueryCommand, UpdateCommand, DeleteCommand, type QueryCommandOutput } from '@aws-sdk/lib-dynamodb';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
 import type { Message } from '@anyhook/core';
-import { SCHED_GSI_PK, type Env } from './config.js';
+import { SCHED_GSI_PK, SWEEPER_LEASE_SECONDS, type Env } from './config.js';
 
 export interface SweeperResult {
-  /** Rows found due (`due_at <= now`) across all pages this run scanned. */
+  /** Rows found due (`due_at <= now`) and not currently lease-held across all pages this run scanned. */
   due: number;
-  /** Rows this run successfully claimed (won the compare-and-set). */
+  /** Rows this run successfully claimed (won the lease compare-and-set). */
   claimed: number;
-  /** Rows sent to SQS and cleaned up (== claimed, barring a send/delete throw). */
+  /** Rows sent to SQS and cleaned up. */
   sent: number;
 }
 
@@ -18,16 +18,25 @@ function isConditionalCheckFailed(e: unknown): boolean {
 }
 
 /**
- * Discover every `SCHED#` row whose `due_at <= now` via the `due_at` GSI, claim each with a
- * conditional `UpdateItem` (`attribute_not_exists(claimed)`) BEFORE sending it to SQS, then delete
- * the row. The claim is what makes two concurrent sweeper invocations safe: only one can win the
- * conditional write for a given row, so a message is enqueued at most once from this path — the
- * other invocation's `ConditionalCheckFailedException` is caught and treated as "someone else has
- * it" rather than retried (D2/ADR-0001). DynamoDB's `ttl` attribute on the row is garbage-collection
- * only; this sweeper — not TTL expiry — is the actual scheduling trigger.
+ * Discover every `SCHED#` row whose `due_at <= now` via the `due_at` GSI, **lease-claim** each with a
+ * conditional `UpdateItem` (stamp `claimed_at`) BEFORE sending it to SQS, then delete the row.
+ *
+ * The lease is what makes two concurrent sweeper invocations safe AND crash/failure-safe:
+ * - Only one invocation can win the conditional write for a given row, so the common path enqueues
+ *   a message at most once (the loser's `ConditionalCheckFailedException` is caught and skipped).
+ * - Crucially, the claim is a LEASE, not a permanent flag: if `SendMessage` throws after a successful
+ *   claim (SQS throttling/outage), the row is neither sent nor deleted, but its `claimed_at` lease
+ *   expires after `SWEEPER_LEASE_SECONDS`, so a later sweep re-claims and re-enqueues it. A due retry
+ *   is therefore never lost (G5) — at worst delayed by one lease interval, or (rarely, under a claim
+ *   race that overlaps a lease boundary) delivered twice, which the stable `webhook-id` dedupes.
+ *
+ * The `attribute_exists(SK)` guard prevents an `UpdateItem` from resurrecting a row another sweep
+ * already sent+deleted (no orphan rows). DynamoDB's `ttl` is garbage-collection only; this sweeper —
+ * never TTL expiry — is the scheduling trigger.
  */
 export async function runSweeper(env: Env, now: number = Date.now()): Promise<SweeperResult> {
   const nowSec = Math.floor(now / 1000);
+  const leaseFloorSec = nowSec - SWEEPER_LEASE_SECONDS;
   const result: SweeperResult = { due: 0, claimed: 0, sent: 0 };
 
   let exclusiveStartKey: QueryCommandOutput['LastEvaluatedKey'];
@@ -41,10 +50,11 @@ export async function runSweeper(env: Env, now: number = Date.now()): Promise<Sw
         ExclusiveStartKey: exclusiveStartKey,
       }),
     );
-    const items = (page.Items as { PK: string; SK: string; message: Message; claimed?: boolean }[]) ?? [];
+    const items = (page.Items as { PK: string; SK: string; message: Message; claimed_at?: number }[]) ?? [];
 
     for (const item of items) {
-      if (item.claimed) continue; // already claimed by an earlier page/run; the row will be deleted or TTL'd
+      // Skip a row whose lease is still valid (claimed recently by a concurrent/earlier in-flight run).
+      if (typeof item.claimed_at === 'number' && item.claimed_at >= leaseFloorSec) continue;
       result.due++;
 
       try {
@@ -52,18 +62,19 @@ export async function runSweeper(env: Env, now: number = Date.now()): Promise<Sw
           new UpdateCommand({
             TableName: env.tableName,
             Key: { PK: item.PK, SK: item.SK },
-            UpdateExpression: 'SET claimed = :true',
-            ConditionExpression: 'attribute_not_exists(claimed)',
-            ExpressionAttributeValues: { ':true': true },
+            UpdateExpression: 'SET claimed_at = :now',
+            ConditionExpression: 'attribute_exists(SK) AND (attribute_not_exists(claimed_at) OR claimed_at < :leaseFloor)',
+            ExpressionAttributeValues: { ':now': nowSec, ':leaseFloor': leaseFloorSec },
           }),
         );
       } catch (e) {
-        if (isConditionalCheckFailed(e)) continue; // a concurrent sweeper invocation won the claim first
+        if (isConditionalCheckFailed(e)) continue; // lost the claim race, or someone holds a fresh lease
         throw e;
       }
       result.claimed++;
 
-      // Claimed and already due: enqueue with no additional SQS-side delay.
+      // Send-then-delete under the held lease. A throw here leaves the row lease-held; it recovers
+      // after the lease expires (never lost, G5). The delete is idempotent (no-op if already gone).
       await env.sqs.send(new SendMessageCommand({ QueueUrl: env.queueUrl, MessageBody: JSON.stringify(item.message), DelaySeconds: 0 }));
       await env.ddb.send(new DeleteCommand({ TableName: env.tableName, Key: { PK: item.PK, SK: item.SK } }));
       result.sent++;

@@ -1,7 +1,7 @@
 /** @fileoverview createAdapter: assembles the AWS port implementations for the engine. @module @anyhook/aws */
 import { defaultUrlPolicy, WebhookEngine, type UrlPolicy } from '@anyhook/core';
 import { createSigner } from '@anyhook/signing';
-import { resolveEnv, type AwsConfig, type Env } from './config.js';
+import { resolveEnv, AWS_MAX_PAYLOAD_BYTES, type AwsConfig, type Env } from './config.js';
 import { SqsTransport } from './transport-sqs.js';
 import { DynamoStateStore } from './state-dynamo.js';
 import { DynamoScheduler } from './scheduler.js';
@@ -47,6 +47,7 @@ export function buildEngine(config: AwsConfig, opts: CreateAdapterOptions = {}):
     scheduler: adapter.scheduler,
     http: adapter.http,
     signer: createSigner(),
+    maxPayloadBytes: AWS_MAX_PAYLOAD_BYTES, // leave SQS-body headroom for the message envelope
   });
   return { engine, adapter };
 }

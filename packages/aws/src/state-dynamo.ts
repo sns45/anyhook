@@ -48,11 +48,16 @@ interface StoredEvent {
 /**
  * `StateStore` on a single DynamoDB table (`PK = TENANT#<tenant>`, item-type-prefixed `SK` — see
  * `config.ts` for the full key design). Every method takes/derives `tenant` first and every key is
- * built from it, so no query can address another tenant's rows (G7). Circuit writes carry an
- * internal `_version` attribute checked via `ConditionExpression` (optimistic concurrency: a
- * conflicting concurrent write throws `CircuitWriteConflictError` instead of silently clobbering);
- * idempotency uses a conditional `PutItem` (`attribute_not_exists(SK)`) so a racing duplicate
- * `recordEvent` is detected atomically rather than via a read-then-write race.
+ * built from it, so no query can address another tenant's rows (G7). Idempotency uses a conditional
+ * `PutItem` (`attribute_not_exists(SK)`) so a racing duplicate `recordEvent` is detected atomically.
+ *
+ * Circuit writes carry an internal `_version` attribute checked via `ConditionExpression`. NOTE: this
+ * guards only `putCircuit`'s OWN read→write window, not the engine's full `getCircuit → OnFailure →
+ * putCircuit` cycle (`getCircuit` intentionally strips `_version`, so the engine can't round-trip it).
+ * Under heavy same-endpoint concurrency a consecutive-failure increment can therefore still be lost —
+ * bounded impact: the breaker may trip slightly late, never data corruption or a miscount toward a
+ * false trip. A detected conflict throws `CircuitWriteConflictError`, which the SQS consumer turns
+ * into a `batchItemFailures` redelivery (at-least-once, self-healing).
  */
 export class DynamoStateStore implements StateStore {
   constructor(private readonly env: Env) {}

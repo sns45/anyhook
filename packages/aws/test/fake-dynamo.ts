@@ -24,6 +24,47 @@ export function createFakeDynamo() {
   const table = new Map<string, FakeItem>();
   const ddbMock = mockClient(DynamoDBDocumentClient);
 
+  // Split `s` on top-level occurrences of `op` (respecting parentheses).
+  function splitTop(s: string, op: string): string[] {
+    const parts: string[] = [];
+    let depth = 0;
+    let last = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      else if (depth === 0 && s.startsWith(op, i)) {
+        parts.push(s.slice(last, i));
+        i += op.length - 1;
+        last = i + 1;
+      }
+    }
+    parts.push(s.slice(last));
+    return parts;
+  }
+
+  function stripOuterParens(s: string): string {
+    s = s.trim();
+    while (s.startsWith('(') && s.endsWith(')')) {
+      let depth = 0;
+      let wraps = true;
+      for (let i = 0; i < s.length; i++) {
+        if (s[i] === '(') depth++;
+        else if (s[i] === ')') {
+          depth--;
+          if (depth === 0 && i < s.length - 1) { wraps = false; break; }
+        }
+      }
+      if (!wraps) break;
+      s = s.slice(1, -1).trim();
+    }
+    return s;
+  }
+
+  const resolveAttr = (raw: string, names?: Record<string, string>) => (raw.startsWith('#') ? names?.[raw] : raw);
+
+  // Minimal boolean-expression evaluator over the vocabulary this adapter emits:
+  // attribute_exists / attribute_not_exists, `A = :v`, `A < :v`, combined with AND/OR + parentheses.
   function evalCondition(
     expr: string | undefined,
     existing: FakeItem | undefined,
@@ -31,14 +72,30 @@ export function createFakeDynamo() {
     values: Record<string, unknown> | undefined,
   ): boolean {
     if (!expr) return true;
-    if (expr.startsWith('attribute_not_exists(')) {
-      const rawAttr = expr.slice('attribute_not_exists('.length, -1);
-      const attr = rawAttr.startsWith('#') ? names?.[rawAttr] : rawAttr;
+    const s = stripOuterParens(expr);
+
+    const ors = splitTop(s, ' OR ');
+    if (ors.length > 1) return ors.some((p) => evalCondition(p, existing, names, values));
+    const ands = splitTop(s, ' AND ');
+    if (ands.length > 1) return ands.every((p) => evalCondition(p, existing, names, values));
+
+    const p = s.trim();
+    if (p.startsWith('attribute_not_exists(')) {
+      const attr = resolveAttr(p.slice('attribute_not_exists('.length, -1), names);
       return existing === undefined || existing[attr!] === undefined;
     }
-    if (expr.includes('=')) {
-      const [rawAttr, rawVal] = expr.split('=').map((s) => s.trim());
-      const attr = rawAttr!.startsWith('#') ? names?.[rawAttr!] : rawAttr;
+    if (p.startsWith('attribute_exists(')) {
+      const attr = resolveAttr(p.slice('attribute_exists('.length, -1), names);
+      return existing !== undefined && attr !== undefined && existing[attr] !== undefined;
+    }
+    if (p.includes('<')) {
+      const [rawAttr, rawVal] = p.split('<').map((x) => x.trim());
+      const attr = resolveAttr(rawAttr!, names);
+      return existing !== undefined && attr !== undefined && (existing[attr] as number) < (values?.[rawVal!] as number);
+    }
+    if (p.includes('=')) {
+      const [rawAttr, rawVal] = p.split('=').map((x) => x.trim());
+      const attr = resolveAttr(rawAttr!, names);
       return existing !== undefined && attr !== undefined && existing[attr] === values?.[rawVal!];
     }
     return true;
@@ -89,8 +146,8 @@ export function createFakeDynamo() {
       table.set(k, next);
       return { Attributes: { seq } };
     }
-    if (input.UpdateExpression === 'SET claimed = :true') {
-      const next: FakeItem = { ...(existing as FakeItem), claimed: true };
+    if (input.UpdateExpression === 'SET claimed_at = :now') {
+      const next: FakeItem = { ...(existing as FakeItem), claimed_at: input.ExpressionAttributeValues?.[':now'] as number };
       table.set(k, next);
       return { Attributes: next };
     }
