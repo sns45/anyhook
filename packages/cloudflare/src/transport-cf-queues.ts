@@ -1,52 +1,47 @@
-/** @fileoverview Transport over Cloudflare Queues (composes @anyq/cloudflare-queues' surface) (G2/G14, A5). @module @anyhook/cloudflare */
+/** @fileoverview Transport composing @anyq/cloudflare-queues over a Cloudflare Queue binding (G2/G14, A5). @module @anyhook/cloudflare */
+import { createCloudflareQueuesProducer, createCloudflareQueuesConsumer } from '@anyq/cloudflare-queues';
 import type { Transport, Message } from '@anyhook/core';
 
 /**
- * anyhook `Transport` backed by a Cloudflare Queue binding.
+ * anyhook `Transport` backed by `@anyq/cloudflare-queues` (A5): the published anyq driver owns the
+ * Cloudflare Queues producer/consumer surface, and anyhook composes it rather than reimplementing
+ * queueing. `send` publishes via the anyq producer; `dispatchBatch` (called from the Worker's
+ * `queue()` export) hands each delivered batch to the anyq consumer, which wraps CF messages as anyq
+ * `IMessage`s and drives the registered handler.
  *
- * This presents the exact producer/consumer surface of `@anyq/cloudflare-queues` (producer =
- * `queue.send`; consumer = per-batch dispatch with ack/retry). Cloudflare Queues is a managed push
- * queue with no queue LOGIC to reimplement, so the wrapper is intentionally thin — anyhook composes
- * anyq's transport abstraction here rather than owning queueing (A5). Once `@anyq/cloudflare-queues`
- * is published to npm, `send`/`dispatchBatch` can delegate to its `createCloudflareQueuesProducer` /
- * `CloudflareQueuesConsumer.processBatch` with no behavior change.
- *
- * Per G2, this layer is pure transport: anyq-level `retry()` redelivery is distinct from anyhook's
- * endpoint retry state machine (which lives in the Durable Objects, never here).
+ * Per G2 this layer is pure transport: the anyq consumer auto-acks on handler success and routes a
+ * handler throw to its retry strategy (transport-level redelivery) — distinct from anyhook's
+ * endpoint retry state machine, which lives in the Durable Objects and has already recorded its
+ * decision before the handler returns.
  */
 export class CfQueuesTransport implements Transport {
-  private handler?: (m: Message) => Promise<void>;
+  private readonly producer: ReturnType<typeof createCloudflareQueuesProducer<Message>>;
+  private readonly consumer: ReturnType<typeof createCloudflareQueuesConsumer<Message>>;
+  private producerConnected = false;
 
-  constructor(private readonly queue: Queue<Message>) {}
+  constructor(queue: Queue<Message>) {
+    this.producer = createCloudflareQueuesProducer<Message>({ queue });
+    this.consumer = createCloudflareQueuesConsumer<Message>({});
+  }
 
   async send(m: Message): Promise<void> {
-    await this.queue.send(m);
+    if (!this.producerConnected) {
+      await this.producer.connect();
+      this.producerConnected = true;
+    }
+    await this.producer.publish(m);
   }
 
   async subscribe(handler: (m: Message) => Promise<void>): Promise<void> {
-    this.handler = handler;
+    await this.consumer.connect();
+    // anyq auto-acks on success; a throw is handled by the driver's retry strategy (G2 redelivery).
+    await this.consumer.subscribe(async (message) => {
+      await handler(message.body);
+    });
   }
 
-  /**
-   * Invoked by the Worker's `queue()` export for each delivered batch. Each message is handed to the
-   * engine's `processMessage`; on success it is `ack()`ed, on an unexpected throw it is `retry()`ed
-   * (anyq transport-level redelivery, distinct from anyhook's endpoint retry state machine — G2).
-   *
-   * Delivery is at-least-once: if `processMessage` throws AFTER the HTTP POST already succeeded but
-   * before its state write commits, the queue will redeliver and the receiver sees the webhook twice.
-   * This is expected and mitigated by the stable `webhook-id` (= messageId) that lets a compliant
-   * receiver dedupe (§8). The common paths — a throw before the POST, or a normal retryable failure
-   * that returns and acks — do not double-deliver.
-   */
+  /** Invoked by the Worker's `queue()` export for each delivered batch. */
   async dispatchBatch(batch: MessageBatch<Message>): Promise<void> {
-    if (!this.handler) throw new Error('CfQueuesTransport.dispatchBatch called before subscribe()');
-    for (const msg of batch.messages) {
-      try {
-        await this.handler(msg.body);
-        msg.ack();
-      } catch {
-        msg.retry();
-      }
-    }
+    await this.consumer.processBatch(batch);
   }
 }

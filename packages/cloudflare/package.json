@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@anyhook/core": "workspace:*",
-    "@anyhook/signing": "workspace:*"
+    "@anyhook/signing": "workspace:*",
+    "@anyq/cloudflare-queues": "^0.3.2"
   },
   "peerDependencies": { "@anyhook/core": "workspace:*" },
   "devDependencies": {
