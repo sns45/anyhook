@@ -1,0 +1,42 @@
+{
+  "name": "@anyhook/signing",
+  "version": "0.1.0",
+  "description": "Standard Webhooks sign/verify primitives for anyhook",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.3.0"
+  },
+  "keywords": [
+    "webhooks",
+    "standard-webhooks",
+    "hmac",
+    "signing"
+  ],
+  "license": "MIT",
+  "author": "Shantanu Sharma",
+  "publishConfig": {
+    "access": "public"
+  }
+}
