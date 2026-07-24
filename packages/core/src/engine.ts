@@ -8,7 +8,9 @@ import type {
   UrlPolicy,
   Clock,
   Rng,
+  Telemetry,
 } from './ports/index.js';
+import { noopTelemetry } from './ports/index.js';
 import type { SendEvent, Receipt } from './types/event.js';
 import type { Message } from './types/message.js';
 import type { Attempt, DlqReason } from './types/attempt.js';
@@ -34,6 +36,8 @@ export interface EngineOptions {
   http: HttpClient;
   /** Injected so @anyhook/core stays zero-runtime-dep (G1); build from @anyhook/signing's createSigner(). */
   signer: WebhookSigner;
+  /** Optional observability sink (§11); defaults to a no-op. */
+  telemetry?: Telemetry;
   urlPolicy?: UrlPolicy;
   clock?: Clock;
   rng?: Rng;
@@ -57,6 +61,7 @@ export class WebhookEngine {
   private readonly retry: RetryConfig;
   private readonly circuitCfg: CircuitConfig;
   private readonly maxPayloadBytes: number;
+  private readonly telemetry: Telemetry;
   private readonly deliverPorts: {
     http: HttpClient;
     signer: WebhookSigner;
@@ -80,6 +85,7 @@ export class WebhookEngine {
       cooldownMs: opts.circuit?.cooldownMs ?? DEFAULT_COOLDOWN_MS,
     };
     this.maxPayloadBytes = opts.maxPayloadBytes ?? DEFAULT_MAX_PAYLOAD_BYTES;
+    this.telemetry = opts.telemetry ?? noopTelemetry;
     this.deliverPorts = {
       http: opts.http,
       signer: opts.signer,
@@ -199,7 +205,7 @@ export class WebhookEngine {
       await this.state.putCircuit(m.tenant, m.endpointId, onSuccess(circuit));
       await this.state.putMessage({ ...m, status: 'delivered' });
       attempt.outcome = 'delivered';
-      await this.state.appendAttempt(attempt);
+      await this.record(attempt);
       return;
     }
 
@@ -220,7 +226,7 @@ export class WebhookEngine {
       return;
     }
 
-    await this.state.appendAttempt(attempt); // outcome 'retried'
+    await this.record(attempt); // outcome 'retried'
     const at = this.clock.now() + delay;
     const next: Message = { ...m, attemptNo: m.attemptNo + 1, status: 'retrying', nextAttemptAt: at };
     await this.state.putMessage(next);
@@ -230,7 +236,13 @@ export class WebhookEngine {
   private async dlq(m: Message, attempt: Attempt, reason: DlqReason): Promise<void> {
     await this.state.putMessage({ ...m, status: 'dead' });
     attempt.outcome = 'dead';
-    await this.state.appendAttempt(attempt);
+    await this.record(attempt);
     await this.state.addToDlq(m, reason);
+  }
+
+  /** Persist an attempt to the delivery log AND emit it to the telemetry sink (§11). */
+  private async record(attempt: Attempt): Promise<void> {
+    await this.state.appendAttempt(attempt);
+    await this.telemetry.recordAttempt(attempt);
   }
 }

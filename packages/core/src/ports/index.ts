@@ -64,6 +64,33 @@ export interface Scheduler {
   scheduleRetry(m: Message, at: number): Promise<void>;
 }
 
+/**
+ * Optional observability sink (§11). Called once per delivery attempt with its full record; a backend
+ * can emit the attempt as a span and increment delivered/retried/dead counters from `attempt.outcome`.
+ * Kept behind this interface so `@anyhook/core` never hard-depends on an OpenTelemetry SDK.
+ *
+ * @example An OpenTelemetry-backed implementation (in your app, NOT core):
+ * ```ts
+ * const telemetry: Telemetry = {
+ *   recordAttempt(a) {
+ *     meter.createCounter(`anyhook.delivery.${a.outcome}`).add(1, { tenant: a.tenant, eventType: a.eventType });
+ *     tracer.startSpan('anyhook.delivery.attempt', { attributes: { status: String(a.status), latencyMs: a.latencyMs } }).end();
+ *   },
+ * };
+ * new WebhookEngine({ ...adapter, signer, telemetry });
+ * ```
+ */
+export interface Telemetry {
+  recordAttempt(attempt: Attempt): void | Promise<void>;
+}
+
+/** No-op telemetry sink (the default when none is injected). */
+export const noopTelemetry: Telemetry = {
+  recordAttempt() {
+    /* no-op */
+  },
+};
+
 /** Query shape for the delivery-log surface. */
 export interface DeliveryQuery {
   tenant: string;

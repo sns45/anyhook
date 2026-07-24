@@ -1,5 +1,5 @@
 /** @fileoverview Shared in-memory engine wiring for core integration tests. @module @anyhook/core */
-import { WebhookEngine, type RetryConfig, type CircuitConfig } from '../src/index.js';
+import { WebhookEngine, type RetryConfig, type CircuitConfig, type Telemetry } from '../src/index.js';
 import {
   MemoryTransport,
   MemoryScheduler,
@@ -26,6 +26,7 @@ export function makeEngine(opts?: {
   circuit?: Partial<CircuitConfig>;
   /** Sign with wall-clock time so delivered headers pass the official ±5min verify tolerance. */
   realClock?: boolean;
+  telemetry?: Telemetry;
 }): Harness {
   const clock = opts?.clock ?? new TestClock(1_000);
   const transport = new MemoryTransport();
@@ -39,6 +40,7 @@ export function makeEngine(opts?: {
     scheduler,
     http,
     signer: createSigner(),
+    telemetry: opts?.telemetry,
     clock: engineClock,
     rng: seededRng(42),
     retry: opts?.retry,
