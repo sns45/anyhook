@@ -1,0 +1,36 @@
+{
+  "name": "@anyhook/aws",
+  "version": "0.1.0",
+  "description": "AWS adapter for anyhook: SQS transport + single-table DynamoDB state + due_at-GSI scheduler with a fixed-interval sweeper",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "files": ["dist"],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target node && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist coverage"
+  },
+  "dependencies": {
+    "@anyhook/core": "workspace:*",
+    "@anyhook/signing": "workspace:*",
+    "@anyq/sqs": "^0.3.1",
+    "@aws-sdk/client-dynamodb": "^3.650.0",
+    "@aws-sdk/lib-dynamodb": "^3.650.0",
+    "@aws-sdk/client-sqs": "^3.650.0"
+  },
+  "peerDependencies": { "@anyhook/core": "workspace:*" },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.3.0",
+    "aws-sdk-client-mock": "^4.0.0",
+    "@types/aws-lambda": "^8.10.0"
+  },
+  "keywords": ["anyhook", "aws", "lambda", "dynamodb", "sqs", "webhooks"],
+  "license": "MIT",
+  "author": "Shantanu Sharma",
+  "publishConfig": { "access": "public" }
+}
