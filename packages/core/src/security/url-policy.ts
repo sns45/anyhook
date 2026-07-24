@@ -8,12 +8,37 @@ export interface UrlPolicyOptions {
   extraDeny?: string[];
 }
 
+/** Parse one IPv4 field in decimal, octal (`0…`), or hex (`0x…`) — the forms `inet_aton` accepts. */
+function parseIpField(s: string): number | null {
+  if (/^0x[0-9a-f]+$/i.test(s)) return parseInt(s, 16);
+  if (/^0[0-7]+$/.test(s)) return parseInt(s, 8);
+  if (/^[0-9]+$/.test(s)) return parseInt(s, 10);
+  return null;
+}
+
+/**
+ * Parse an IPv4 literal in any common encoding into octets: dotted-decimal, dotted octal/hex
+ * (`0177.0.0.1`, `0x7f.0.0.1`), or a single 32-bit integer (`2130706433`, `0x7f000001`).
+ * Returns null when the host is not a numeric IPv4 literal in any of these forms.
+ */
 function ipv4ToOctets(host: string): number[] | null {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!m) return null;
-  const octets = m.slice(1, 5).map(Number);
-  if (octets.some((o) => o > 255)) return null;
-  return octets;
+  const parts = host.split('.');
+  if (parts.length === 4) {
+    const octs = parts.map(parseIpField);
+    if (octs.some((o) => o === null || o! < 0 || o! > 255)) return null;
+    return octs as number[];
+  }
+  if (parts.length === 1) {
+    const n = parseIpField(parts[0]!);
+    if (n === null || n < 0 || n > 0xffffffff) return null;
+    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  }
+  return null; // 2/3-part inet_aton forms are rare and ambiguous — handled by the numeric-host guard
+}
+
+/** A host that looks like an obfuscated numeric IP but did not parse cleanly is refused, not allowed. */
+function looksNumeric(host: string): boolean {
+  return /[0-9]/.test(host) && /^(0x[0-9a-f]+|[0-9]+)(\.(0x[0-9a-f]+|[0-9]+))*$/i.test(host);
 }
 
 /** Private / loopback / link-local / reserved IPv4 ranges. */
@@ -32,7 +57,9 @@ function isBlockedIpv4([a, b]: number[]): boolean {
 function isBlockedIpv6(raw: string): boolean {
   let h = raw.toLowerCase();
   if (h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
-  if (h === '::1' || h === '::') return true; // loopback / unspecified
+  if (h === '::1' || h === '::') return true; // loopback / unspecified (compressed)
+  if (/^(0:){7}1$/.test(h)) return true; // full-form loopback 0:0:0:0:0:0:0:1
+  if (/^(0:){7}0$/.test(h) || /^0(:0)*::?0?$/.test(h)) return true; // full-form unspecified
   if (h.startsWith('fe8') || h.startsWith('fe9') || h.startsWith('fea') || h.startsWith('feb')) return true; // fe80::/10 link-local
   if (h.startsWith('fc') || h.startsWith('fd')) return true; // fc00::/7 unique-local
   // IPv4-mapped (::ffff:a.b.c.d) — validate the embedded v4
@@ -77,6 +104,12 @@ export function defaultUrlPolicy(opts: UrlPolicyOptions = {}): UrlPolicy {
       if (v4) {
         if (isBlockedIpv4(v4)) return { allowed: false, reason: 'private_or_reserved_ipv4' };
         return { allowed: true };
+      }
+
+      // A host that looks like an obfuscated numeric IP but didn't parse to a valid IPv4 is refused,
+      // never treated as a public hostname (defends against inet_aton edge encodings).
+      if (looksNumeric(host)) {
+        return { allowed: false, reason: 'ambiguous_numeric_host' };
       }
 
       if (host.includes(':') || (parsed.hostname.startsWith('[') && parsed.hostname.endsWith(']'))) {

@@ -19,6 +19,10 @@ export interface DeliveryApi {
 
 export function createDeliveryApi(state: StateStore, transport: Transport, clock: Clock): DeliveryApi {
   async function reenqueue(m: Message): Promise<void> {
+    // Intentionally KEEP the original messageId (→ same webhook-id). A dead message was never received,
+    // so a compliant receiver won't dedupe the replay away; and reusing the id preserves the
+    // "same logical delivery" linkage so a replay of a message that DID deliver is correctly idempotent
+    // on the receiver rather than double-processed (§8).
     const fresh: Message = { ...m, attemptNo: 0, status: 'pending', nextAttemptAt: undefined, createdAt: clock.now() };
     await state.putMessage(fresh);
     await transport.send(fresh);

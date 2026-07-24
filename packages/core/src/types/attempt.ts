@@ -19,5 +19,17 @@ export interface Attempt {
   outcome: 'delivered' | 'retried' | 'dead';
 }
 
-/** Machine-readable reason a message landed in the DLQ. */
-export type DlqReason = 'exhausted_retries' | 'permanent_4xx' | 'circuit_open_expired';
+/**
+ * Machine-readable reason a message landed in the DLQ.
+ * - `exhausted_retries`   retry schedule ran out
+ * - `permanent_4xx`       receiver returned a non-retryable 4xx/3xx
+ * - `blocked_ssrf`        target refused by the URL/SSRF policy (never delivered)
+ * - `endpoint_gone`       endpoint was deleted/disabled after the message was enqueued
+ * - `circuit_open_expired` reserved for a future "parked past max retention" path (not emitted in v0.1)
+ */
+export type DlqReason =
+  | 'exhausted_retries'
+  | 'permanent_4xx'
+  | 'blocked_ssrf'
+  | 'endpoint_gone'
+  | 'circuit_open_expired';

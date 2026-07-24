@@ -14,6 +14,7 @@ import type { Message } from './types/message.js';
 import type { Attempt, DlqReason } from './types/attempt.js';
 import type { RetryConfig, CircuitConfig } from './types/config.js';
 import { DEFAULT_SCHEDULE_MS, nextDelayMs } from './policy/retry.js';
+import { fullJitter } from './policy/jitter.js';
 import { DEFAULT_FAILURE_THRESHOLD, DEFAULT_COOLDOWN_MS, canAttempt, toHalfOpen, onSuccess, onFailure } from './policy/circuit.js';
 import { deriveIdempotencyKey, newId } from './id.js';
 import { fanout } from './fanout.js';
@@ -110,7 +111,11 @@ export class WebhookEngine {
     const eventId = newId('evt', this.rng);
     const rec = await this.state.recordEvent(event.tenant, eventId, idemKey);
     if (!rec.isNew) {
-      // idempotent replay: return the original receipt without re-fanning-out
+      // Idempotent replay: return the original receipt without re-fanning-out.
+      // NOTE: `messageCount` reflects the value at finalizeEvent() time. A duplicate that races the
+      // ORIGINAL send (before it finalizes) may observe 0. Correct enforcement of "exactly-once
+      // acceptance under concurrency/crash" is the state adapter's job — the Cloudflare Durable Object
+      // is single-threaded per (tenant,endpoint) and AWS uses DynamoDB conditional writes (D2/ADR-0001).
       return { eventId: rec.eventId, accepted: true, messageCount: rec.messageCount };
     }
 
@@ -132,8 +137,12 @@ export class WebhookEngine {
     const endpoint = await this.state.getEndpoint(m.tenant, m.endpointId);
     if (!endpoint || endpoint.disabled) {
       // Endpoint deleted/disabled after enqueue: dead-letter so it is visible, don't retry forever.
-      await this.state.putMessage({ ...m, status: 'dead' });
-      await this.state.addToDlq(m, 'permanent_4xx');
+      // Append a terminal attempt for delivery-log consistency with every other DLQ path.
+      const goneAttempt: Attempt = {
+        messageId: m.messageId, endpointId: m.endpointId, tenant: m.tenant, eventType: m.eventType,
+        attemptNo: m.attemptNo, status: 'network', latencyMs: 0, respSnippet: 'endpoint_gone', ts: this.clock.now(), outcome: 'dead',
+      };
+      await this.dlq(m, goneAttempt, 'endpoint_gone');
       return;
     }
 
@@ -142,8 +151,10 @@ export class WebhookEngine {
     const gate = canAttempt(circuit, this.clock.now());
     if (!gate.allow) {
       // Circuit open within cooldown: park as blocked (NOT an attempt) and re-probe after cooldown.
+      // Jitter the wake time so a backlog of parked messages doesn't stampede the moment cooldown ends.
       await this.state.putMessage({ ...m, status: 'blocked' });
-      const probeAt = (circuit.openedAt ?? this.clock.now()) + circuit.cooldownMs;
+      const base = (circuit.openedAt ?? this.clock.now()) + circuit.cooldownMs;
+      const probeAt = base + fullJitter(circuit.cooldownMs, this.rng);
       await this.scheduler.scheduleRetry(m, probeAt);
       return;
     }
@@ -179,7 +190,7 @@ export class WebhookEngine {
     if (result.outcome === 'permanent') {
       // 4xx (except 429) or SSRF refusal → straight to DLQ, no retry (§8/G9).
       await this.state.putCircuit(m.tenant, m.endpointId, onFailure(circuit, this.clock.now(), this.circuitCfg.failureThreshold));
-      await this.dlq(m, attempt, 'permanent_4xx');
+      await this.dlq(m, attempt, result.blockedBySsrf ? 'blocked_ssrf' : 'permanent_4xx');
       return;
     }
 

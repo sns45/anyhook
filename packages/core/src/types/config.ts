@@ -6,7 +6,7 @@ export interface RetryConfig {
   scheduleMs: number[];
 }
 
-/** Circuit-breaker tuning (per engine; overridable per endpoint). */
+/** Circuit-breaker tuning. Engine-level in v0.1 (per-endpoint override is a post-v1 option). */
 export interface CircuitConfig {
   /** Consecutive failed messages before the circuit opens (D4 default: 5). */
   failureThreshold: number;

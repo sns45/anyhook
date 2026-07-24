@@ -57,6 +57,23 @@ describe('MockReceiver delivery matrix (§12)', () => {
   });
 });
 
+describe('SSRF refusal at delivery time (G6)', () => {
+  test('an endpoint whose URL is blocked is dead-lettered as blocked_ssrf, never POSTed', async () => {
+    const clock = new TestClock(1_000);
+    const url = 'http://169.254.169.254/latest/meta-data'; // cloud metadata
+    const receiver = new MockReceiver(clock).on(url, Receiver.ok());
+    const h = makeEngine({ clock, receiver });
+    await h.engine.start();
+    await h.engine.endpoints.create({ tenant: 'acme', url, eventTypes: ['*'] });
+    await h.engine.send({ type: 'e.t', tenant: 'acme', payload: {} });
+    await runDeliveries({ transport: h.transport, scheduler: h.scheduler, clock: h.clock });
+
+    expect(h.http.callCount(url)).toBe(0); // never delivered
+    const dlq = await h.state.listDlq('acme');
+    expect(dlq).toEqual([expect.objectContaining({ reason: 'blocked_ssrf' })]);
+  });
+});
+
 describe('circuit opens under sustained failure (G13)', () => {
   test('circuit is open after 5 consecutive failed messages to an endpoint', async () => {
     const clock = new TestClock(1_000);

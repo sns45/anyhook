@@ -24,6 +24,18 @@ describe('SSRF default URL policy (G6)', () => {
     expect(res.allowed).toBe(allowed);
   });
 
+  test.each([
+    ['http://2130706433/x', false], // decimal 127.0.0.1
+    ['http://0x7f000001/x', false], // hex 127.0.0.1
+    ['http://0x7f.0.0.1/x', false], // dotted hex
+    ['http://0177.0.0.1/x', false], // dotted octal 127.0.0.1
+    ['http://2852039166/x', false], // decimal 169.254.169.254 (metadata)
+    ['http://[0:0:0:0:0:0:0:1]/x', false], // full-form IPv6 loopback
+    ['http://99999999999/x', false], // numeric but not a valid IP → refused, not allowed
+  ] as const)('obfuscated IP %s -> allowed=%p (SSRF hardening)', async (url, allowed) => {
+    expect((await policy.check(url)).allowed).toBe(allowed);
+  });
+
   test('https-only mode rejects http', async () => {
     const strict = defaultUrlPolicy({ allowHttp: false });
     expect((await strict.check('http://example.com')).allowed).toBe(false);

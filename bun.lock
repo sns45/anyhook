@@ -12,7 +12,10 @@
       "name": "@anyhook/core",
       "version": "0.1.0",
       "devDependencies": {
+        "@anyhook/signing": "workspace:*",
+        "@anyhook/testing": "workspace:*",
         "@types/bun": "^1.1.0",
+        "standardwebhooks": "^1.0.0",
         "typescript": "^5.3.0",
       },
       "peerDependencies": {
@@ -31,11 +34,28 @@
         "typescript": "^5.0.0",
       },
     },
+    "packages/testing": {
+      "name": "@anyhook/testing",
+      "version": "0.1.0",
+      "dependencies": {
+        "@anyhook/core": "workspace:*",
+        "@anyhook/signing": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.1.0",
+        "typescript": "^5.3.0",
+      },
+      "peerDependencies": {
+        "@anyhook/core": "workspace:*",
+      },
+    },
   },
   "packages": {
     "@anyhook/core": ["@anyhook/core@workspace:packages/core"],
 
     "@anyhook/signing": ["@anyhook/signing@workspace:packages/signing"],
+
+    "@anyhook/testing": ["@anyhook/testing@workspace:packages/testing"],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 
