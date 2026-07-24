@@ -1,6 +1,6 @@
 {
   "name": "@anyhook/signing",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Standard Webhooks sign/verify primitives for anyhook",
   "type": "module",
   "main": "./dist/index.js",

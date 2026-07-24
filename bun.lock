@@ -12,7 +12,7 @@
     },
     "packages/aws": {
       "name": "@anyhook/aws",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@anyhook/core": "workspace:*",
         "@anyhook/signing": "workspace:*",
@@ -33,7 +33,7 @@
     },
     "packages/cloudflare": {
       "name": "@anyhook/cloudflare",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@anyhook/core": "workspace:*",
         "@anyhook/signing": "workspace:*",
@@ -52,7 +52,7 @@
     },
     "packages/core": {
       "name": "@anyhook/core",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@anyhook/signing": "workspace:*",
         "@anyhook/testing": "workspace:*",
@@ -66,7 +66,7 @@
     },
     "packages/signing": {
       "name": "@anyhook/signing",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "devDependencies": {
         "@types/bun": "^1.1.0",
         "standardwebhooks": "1.0.0",
@@ -78,7 +78,7 @@
     },
     "packages/testing": {
       "name": "@anyhook/testing",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "dependencies": {
         "@anyhook/core": "workspace:*",
         "@anyhook/signing": "workspace:*",
