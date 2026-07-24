@@ -1,0 +1,127 @@
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Gate the release on the full test suite (build + typecheck + test + dep-check).
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Configure registry auth (NPM_TOKEN sourced from Doppler)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          cat > /tmp/configure-registry-auth.sh <<'SCRIPT'
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::NPM_TOKEN could not be resolved from Doppler. Set the DOPPLER_TOKEN repo secret and ensure the Doppler config exposes an NPM_TOKEN with publish rights to the @anyhook scope."
+            exit 1
+          fi
+          # npm reads ~/.npmrc (whoami preflight + `npm view`).
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          # bun publish authenticates via bunfig.toml [install.registry]; the literal "$NPM_TOKEN"
+          # is expanded by bun from the env at publish time, so the token is never written to disk.
+          {
+            echo ""
+            echo "[install.registry]"
+            echo 'url = "https://registry.npmjs.org"'
+            echo 'token = "$NPM_TOKEN"'
+          } >> bunfig.toml
+          SCRIPT
+          doppler run -- bash /tmp/configure-registry-auth.sh
+
+      - name: Verify npm authentication
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          cat > /tmp/verify-npm-auth.sh <<'SCRIPT'
+          if ! npm whoami >/dev/null 2>&1; then
+            echo "::error::npm authentication failed. NPM_TOKEN (from Doppler via DOPPLER_TOKEN) is missing, expired, or lacks publish rights to the @anyhook scope."
+            exit 1
+          fi
+          echo "Authenticated to npm as: $(npm whoami)"
+          SCRIPT
+          doppler run -- bash /tmp/verify-npm-auth.sh
+
+      - name: Publish all packages
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          cat > /tmp/publish-packages.sh <<'SCRIPT'
+          set -uo pipefail
+
+          # Dependency order: zero-dep libs first, then adapters that depend on them.
+          PACKAGES=(
+            signing
+            core
+            testing
+            cloudflare
+            aws
+          )
+
+          published=()
+          skipped=()
+          failed=()
+
+          for pkg in "${PACKAGES[@]}"; do
+            name="@anyhook/$pkg"
+            version="$(node -p "require('./packages/$pkg/package.json').version")"
+
+            # Idempotent: skip versions already on the registry so re-running a tag is safe.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "Skipping ${name}@${version} (already on npm)"
+              skipped+=("${name}@${version}")
+              continue
+            fi
+
+            echo "Publishing ${name}@${version}..."
+            if ( cd "packages/$pkg" && bun publish --access public --no-git-checks ); then
+              published+=("${name}@${version}")
+            else
+              echo "::error::Failed to publish ${name}@${version}"
+              failed+=("${name}@${version}")
+            fi
+          done
+
+          {
+            echo "## Publish results"
+            echo ""
+            echo "### Published (${#published[@]})"
+            for p in "${published[@]:-}"; do [ -n "$p" ] && echo "- \`$p\`"; done
+            echo ""
+            echo "### Skipped, already on npm (${#skipped[@]})"
+            for p in "${skipped[@]:-}"; do [ -n "$p" ] && echo "- \`$p\`"; done
+            echo ""
+            echo "### Failed (${#failed[@]})"
+            for p in "${failed[@]:-}"; do [ -n "$p" ] && echo "- \`$p\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::${#failed[@]} package(s) failed to publish: ${failed[*]}"
+            exit 1
+          fi
+          SCRIPT
+          doppler run -- bash /tmp/publish-packages.sh
