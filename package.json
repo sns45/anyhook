@@ -1,0 +1,21 @@
+{
+  "name": "anyhook-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/examples/*"],
+  "scripts": {
+    "build": "bun run --filter '@anyhook/signing' build && bun run --filter '@anyhook/core' build && bun run --filter '@anyhook/*' --filter '!@anyhook/signing' --filter '!@anyhook/core' build",
+    "test": "bun run --filter '@anyhook/signing' --filter '@anyhook/core' --filter '@anyhook/testing' test",
+    "typecheck": "bun run --filter '@anyhook/*' typecheck",
+    "dep-check": "bun test packages/core/test/no-sdk-deps.test.ts",
+    "lint": "echo 'Linter not yet configured'",
+    "clean": "bun run --filter '@anyhook/*' clean"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
