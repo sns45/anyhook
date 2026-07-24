@@ -22,7 +22,13 @@
     "clean": "rm -rf dist coverage"
   },
   "peerDependencies": { "typescript": "^5.0.0" },
-  "devDependencies": { "@types/bun": "^1.1.0", "typescript": "^5.3.0" },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "typescript": "^5.3.0",
+    "@anyhook/signing": "workspace:*",
+    "@anyhook/testing": "workspace:*",
+    "standardwebhooks": "^1.0.0"
+  },
   "keywords": ["webhooks", "outbound", "standard-webhooks", "retry", "circuit-breaker", "edge", "serverless"],
   "license": "MIT",
   "author": "Shantanu Sharma",

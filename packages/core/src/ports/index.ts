@@ -14,9 +14,9 @@ export interface Rng {
   next(): number;
 }
 
-/** Result of a single delivery POST. */
+/** Result of a single delivery POST. `headers` (lowercased keys) let the engine honor `Retry-After` (§9.1). */
 export type HttpResult =
-  | { status: number; body: string }
+  | { status: number; body: string; headers?: Record<string, string> }
   | { status: 'timeout' | 'network' };
 
 /** Outbound HTTP capability. Adapters enforce SSRF/redirect policy at connection time. */
