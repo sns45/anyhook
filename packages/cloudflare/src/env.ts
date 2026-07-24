@@ -16,3 +16,12 @@ export interface Env {
   /** Delivery transport; retry alarms re-enqueue onto this queue. */
   QUEUE: Queue<Message>;
 }
+
+/**
+ * Deterministic name for an endpoint's Durable Object. Length-prefixes the tenant so the
+ * `tenant`/`endpointId` boundary is unambiguous even if a tenant identifier contains a `:` —
+ * `endpointDoName('a:b','x')` and `endpointDoName('a','b:x')` can never collide (G7).
+ */
+export function endpointDoName(tenant: string, endpointId: string): string {
+  return `${tenant.length}:${tenant}:${endpointId}`;
+}

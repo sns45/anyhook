@@ -30,8 +30,13 @@ export class CfQueuesTransport implements Transport {
   /**
    * Invoked by the Worker's `queue()` export for each delivered batch. Each message is handed to the
    * engine's `processMessage`; on success it is `ack()`ed, on an unexpected throw it is `retry()`ed
-   * (anyq transport-level redelivery — the endpoint-level retry decision was already recorded in the
-   * Durable Object before any throw could occur).
+   * (anyq transport-level redelivery, distinct from anyhook's endpoint retry state machine — G2).
+   *
+   * Delivery is at-least-once: if `processMessage` throws AFTER the HTTP POST already succeeded but
+   * before its state write commits, the queue will redeliver and the receiver sees the webhook twice.
+   * This is expected and mitigated by the stable `webhook-id` (= messageId) that lets a compliant
+   * receiver dedupe (§8). The common paths — a throw before the POST, or a normal retryable failure
+   * that returns and acks — do not double-deliver.
    */
   async dispatchBatch(batch: MessageBatch<Message>): Promise<void> {
     if (!this.handler) throw new Error('CfQueuesTransport.dispatchBatch called before subscribe()');

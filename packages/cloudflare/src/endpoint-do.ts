@@ -124,27 +124,31 @@ export class EndpointDurableObject extends DurableObject<Env> {
   async processDueSchedules(): Promise<{ enqueued: number }> {
     const now = Date.now();
     const all = await this.ctx.storage.list<Message>({ prefix: SCHED_PREFIX });
-    const dueKeys: string[] = [];
-    const dueMessages: Message[] = [];
+    const due: { key: string; message: Message }[] = [];
     let earliestRemaining: number | undefined;
     for (const [key, message] of all) {
       const at = parseSchedAt(key);
       if (at <= now) {
-        dueKeys.push(key);
-        dueMessages.push(message);
+        due.push({ key, message });
       } else if (earliestRemaining === undefined || at < earliestRemaining) {
         earliestRemaining = at;
       }
     }
-    if (dueKeys.length > 0) {
-      await this.ctx.storage.delete(dueKeys);
-      for (const message of dueMessages) {
-        await this.env.QUEUE.send(message);
-      }
+
+    // Send-then-delete PER MESSAGE: if a QUEUE.send throws (queue outage/quota), that message's
+    // sched entry survives and the alarm retry re-enqueues it — at-least-once, never a lost retry.
+    // (A duplicate on the rare send-succeeds-then-throws path is deduped receiver-side via the
+    // stable webhook-id = messageId.)
+    let enqueued = 0;
+    for (const { key, message } of due) {
+      await this.env.QUEUE.send(message);
+      await this.ctx.storage.delete(key);
+      enqueued++;
     }
+
     if (earliestRemaining !== undefined) {
       await this.ctx.storage.setAlarm(earliestRemaining);
     }
-    return { enqueued: dueMessages.length };
+    return { enqueued };
   }
 }

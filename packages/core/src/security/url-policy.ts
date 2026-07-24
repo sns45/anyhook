@@ -73,8 +73,12 @@ function isBlockedIpv6(raw: string): boolean {
 
 /**
  * Default deny-list policy. Refuses non-http(s) schemes and private/loopback/link-local
- * literal-IP targets. Public hostnames are allowed here; connection-time re-validation
- * (DNS-rebinding defense) belongs in the adapter's HttpClient — documented, not done statically.
+ * literal-IP targets. Public hostnames are allowed here.
+ *
+ * KNOWN LIMITATION (accepted, not delegated): this is a static hostname/literal-IP check. A public
+ * hostname that resolves to a private IP (DNS rebinding) is NOT caught — and the `fetch` API exposes
+ * no hook to re-validate the resolved connection IP, so adapters cannot fully close this either.
+ * Operators on shared infra needing that guarantee must run anyhook behind egress network controls.
  */
 export function defaultUrlPolicy(opts: UrlPolicyOptions = {}): UrlPolicy {
   const allowHttp = opts.allowHttp ?? true;

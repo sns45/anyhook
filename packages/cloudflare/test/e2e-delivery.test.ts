@@ -100,6 +100,12 @@ describe('Cloudflare end-to-end delivery (§15.1)', () => {
     expect(hook.headers['webhook-id']).toBeDefined();
     expect(() => verify(hook.headers, hook.body, secret)).not.toThrow();
 
+    // 4b. The portal list endpoint must NOT leak signing secrets (G10).
+    const listRes = await mf.dispatchFetch('http://w/v1/endpoints', { headers: H });
+    const eps = (await listRes.json()) as Record<string, unknown>[];
+    expect(eps.length).toBe(1);
+    expect('secrets' in eps[0]!).toBe(false);
+
     // 5. The delivery is recorded in the delivery log as delivered.
     const logRes = await mf.dispatchFetch(`http://w/v1/deliveries?endpointId=${endpointId}`, { headers: H });
     const rows = (await logRes.json()) as { message: { status: string }; attempts: unknown[] }[];

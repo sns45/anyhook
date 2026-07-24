@@ -37,6 +37,22 @@ describe('endpoint management (§7.2)', () => {
     expect(r.messageCount).toBe(0);
   });
 
+  test('list/get/update never expose signing secrets (G10)', async () => {
+    const h = makeEngine();
+    await h.engine.start();
+    const { endpointId } = await h.engine.endpoints.create({ tenant: 'acme', url: 'https://a/h', eventTypes: ['*'] });
+
+    const listed = await h.engine.endpoints.list({ tenant: 'acme' });
+    expect(listed[0]).toBeDefined();
+    expect('secrets' in listed[0]!).toBe(false);
+
+    const got = await h.engine.endpoints.get({ tenant: 'acme', endpointId });
+    expect('secrets' in got!).toBe(false);
+
+    const updated = await h.engine.endpoints.update({ tenant: 'acme', endpointId, disabled: true });
+    expect('secrets' in updated).toBe(false);
+  });
+
   test('delete removes the endpoint', async () => {
     const h = makeEngine();
     await h.engine.start();

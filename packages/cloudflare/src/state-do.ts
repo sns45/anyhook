@@ -8,7 +8,7 @@ import type {
   Attempt,
   DlqReason,
 } from '@anyhook/core';
-import type { Env } from './env.js';
+import { endpointDoName, type Env } from './env.js';
 
 /**
  * `StateStore` implementation backed by two Durable Object classes (D3: one DO per endpoint):
@@ -26,7 +26,7 @@ export class DoStateStore implements StateStore {
   }
 
   private endpointStub(tenant: string, endpointId: string) {
-    return this.env.ENDPOINT.get(this.env.ENDPOINT.idFromName(`${tenant}:${endpointId}`));
+    return this.env.ENDPOINT.get(this.env.ENDPOINT.idFromName(endpointDoName(tenant, endpointId)));
   }
 
   async recordEvent(
