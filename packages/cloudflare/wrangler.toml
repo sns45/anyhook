@@ -3,6 +3,8 @@
 name = "anyhook"
 main = "src/worker.ts"
 compatibility_date = "2024-11-01"
+# anyhook's signing/idempotency use node:crypto (HMAC-SHA256); enable Node compat on Workers.
+compatibility_flags = ["nodejs_compat"]
 
 # Delivery transport (Cloudflare Queues). Producer + consumer bound to the same queue.
 [[queues.producers]]

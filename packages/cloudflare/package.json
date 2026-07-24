@@ -10,7 +10,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir ./dist --target bun --external cloudflare:workers && bun run build:types",
     "build:types": "tsc --emitDeclarationOnly --outDir dist",
-    "test": "bun test",
+    "test": "for f in test/*.test.ts; do bun test \"$f\" || exit 1; done",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist coverage"
   },

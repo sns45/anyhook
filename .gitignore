@@ -5,3 +5,4 @@ coverage/
 *.tsbuildinfo
 .superpowers/
 data/
+packages/cloudflare/test/.e2e-bundle/

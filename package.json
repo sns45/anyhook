@@ -5,7 +5,7 @@
   "workspaces": ["packages/*", "apps/examples/*"],
   "scripts": {
     "build": "bun run --filter '@anyhook/signing' build && bun run --filter '@anyhook/core' build && bun run --filter '@anyhook/*' --filter '!@anyhook/signing' --filter '!@anyhook/core' build",
-    "test": "bun run --filter '@anyhook/signing' --filter '@anyhook/core' --filter '@anyhook/testing' test",
+    "test": "bun run --filter '@anyhook/signing' --filter '@anyhook/core' --filter '@anyhook/testing' --filter '@anyhook/cloudflare' test",
     "typecheck": "bun run --filter '@anyhook/*' typecheck",
     "dep-check": "bun test packages/core/test/no-sdk-deps.test.ts",
     "lint": "echo 'Linter not yet configured'",
