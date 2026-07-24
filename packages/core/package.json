@@ -1,0 +1,30 @@
+{
+  "name": "@anyhook/core",
+  "version": "0.1.0",
+  "description": "Runtime-agnostic outbound webhook delivery engine: ports, types, retry/circuit state machine, fan-out, portal handlers",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" },
+    "./ports": { "import": "./dist/ports/index.js", "types": "./dist/ports/index.d.ts" },
+    "./policy": { "import": "./dist/policy/index.js", "types": "./dist/policy/index.d.ts" },
+    "./portal": { "import": "./dist/portal/index.js", "types": "./dist/portal/index.d.ts" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun && bun run build:types",
+    "build:types": "tsc --emitDeclarationOnly --outDir dist",
+    "dev": "bun build ./src/index.ts --outdir ./dist --target bun --watch",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage"
+  },
+  "peerDependencies": { "typescript": "^5.0.0" },
+  "devDependencies": { "@types/bun": "^1.1.0", "typescript": "^5.3.0" },
+  "keywords": ["webhooks", "outbound", "standard-webhooks", "retry", "circuit-breaker", "edge", "serverless"],
+  "license": "MIT",
+  "author": "Shantanu Sharma",
+  "publishConfig": { "access": "public" }
+}
