@@ -38,3 +38,12 @@ type CircuitRecord struct {
 	OpenedAt   *int64
 	CooldownMs int64
 }
+
+// RateBucket is per-endpoint token-bucket rate-limit state persisted in the
+// durable StateStore. Mirrors TS RateBucket (packages/core/src/types/endpoint.ts).
+type RateBucket struct {
+	// Tokens is the available delivery tokens (fractional).
+	Tokens float64
+	// LastRefillMs is the epoch-ms the bucket was last refilled.
+	LastRefillMs int64
+}

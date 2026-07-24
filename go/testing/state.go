@@ -18,21 +18,23 @@ type eventRecord struct {
 }
 
 type tenantData struct {
-	events    map[string]eventRecord // idemKey -> record
-	endpoints map[string]core.Endpoint
-	messages  map[string]core.Message
-	attempts  map[string][]core.Attempt
-	circuits  map[string]core.CircuitRecord
-	dlq       []core.DlqEntry
+	events      map[string]eventRecord // idemKey -> record
+	endpoints   map[string]core.Endpoint
+	messages    map[string]core.Message
+	attempts    map[string][]core.Attempt
+	circuits    map[string]core.CircuitRecord
+	rateBuckets map[string]core.RateBucket
+	dlq         []core.DlqEntry
 }
 
 func newTenantData() *tenantData {
 	return &tenantData{
-		events:    map[string]eventRecord{},
-		endpoints: map[string]core.Endpoint{},
-		messages:  map[string]core.Message{},
-		attempts:  map[string][]core.Attempt{},
-		circuits:  map[string]core.CircuitRecord{},
+		events:      map[string]eventRecord{},
+		endpoints:   map[string]core.Endpoint{},
+		messages:    map[string]core.Message{},
+		attempts:    map[string][]core.Attempt{},
+		circuits:    map[string]core.CircuitRecord{},
+		rateBuckets: map[string]core.RateBucket{},
 	}
 }
 
@@ -289,6 +291,26 @@ func (s *MemoryStateStore) PutCircuit(_ context.Context, tenant, endpointID stri
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tenant(tenant).circuits[endpointID] = rec
+	return nil
+}
+
+// GetRateBucket implements core.StateStore.
+func (s *MemoryStateStore) GetRateBucket(_ context.Context, tenant, endpointID string) (*core.RateBucket, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.tenant(tenant).rateBuckets[endpointID]
+	if !ok {
+		return nil, nil
+	}
+	cp := b
+	return &cp, nil
+}
+
+// PutRateBucket implements core.StateStore.
+func (s *MemoryStateStore) PutRateBucket(_ context.Context, tenant, endpointID string, bucket core.RateBucket) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tenant(tenant).rateBuckets[endpointID] = bucket
 	return nil
 }
 

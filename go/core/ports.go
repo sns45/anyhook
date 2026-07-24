@@ -160,6 +160,30 @@ type StateStore interface {
 	GetCircuit(ctx context.Context, tenant, endpointID string) (CircuitRecord, error)
 	PutCircuit(ctx context.Context, tenant, endpointID string, rec CircuitRecord) error
 
+	// GetRateBucket returns the per-endpoint rate-limit token bucket (§10).
+	// Returns (nil, nil) when never set; the caller seeds a full bucket via
+	// InitialBucket.
+	GetRateBucket(ctx context.Context, tenant, endpointID string) (*RateBucket, error)
+	PutRateBucket(ctx context.Context, tenant, endpointID string, bucket RateBucket) error
+
 	AddToDlq(ctx context.Context, m Message, reason DlqReason) error
 	ListDlq(ctx context.Context, tenant, endpointID string) ([]DlqEntry, error)
 }
+
+// Telemetry is an optional observability sink (§11). Called once per
+// delivery attempt with its full record; a backend can emit the attempt as a
+// span and increment delivered/retried/dead counters from Attempt.Outcome.
+// Kept behind this interface so package core never hard-depends on an
+// OpenTelemetry SDK.
+type Telemetry interface {
+	RecordAttempt(attempt Attempt)
+}
+
+// noopTelemetry is the zero-value Telemetry implementation backing NoopTelemetry.
+type noopTelemetry struct{}
+
+// RecordAttempt implements Telemetry as a no-op.
+func (noopTelemetry) RecordAttempt(Attempt) {}
+
+// NoopTelemetry is the no-op telemetry sink (the default when none is injected).
+var NoopTelemetry Telemetry = noopTelemetry{}

@@ -25,7 +25,9 @@ type EngineOptions struct {
 	HTTP      HTTPClient
 	// Signer is injected so package core stays zero-runtime-dep (G1); build
 	// one from package signing's CoreSigner.
-	Signer          WebhookSigner
+	Signer WebhookSigner
+	// Telemetry is an optional observability sink (§11); nil -> NoopTelemetry.
+	Telemetry       Telemetry
 	URLPolicy       URLPolicy // nil -> DefaultURLPolicy(URLPolicyOptions{})
 	Clock           Clock     // nil -> wall clock
 	Rng             Rng       // nil -> math/rand-backed
@@ -48,6 +50,7 @@ type Engine struct {
 	retry           RetryConfig
 	circuitCfg      CircuitConfig
 	maxPayloadBytes int64
+	telemetry       Telemetry
 	deliverPorts    DeliverPorts
 }
 
@@ -90,6 +93,10 @@ func NewEngine(opts EngineOptions) *Engine {
 	if urlPolicy == nil {
 		urlPolicy = DefaultURLPolicy(URLPolicyOptions{})
 	}
+	telemetry := opts.Telemetry
+	if telemetry == nil {
+		telemetry = NoopTelemetry
+	}
 
 	return &Engine{
 		transport:       opts.Transport,
@@ -100,6 +107,7 @@ func NewEngine(opts EngineOptions) *Engine {
 		retry:           retry,
 		circuitCfg:      circuitCfg,
 		maxPayloadBytes: maxPayloadBytes,
+		telemetry:       telemetry,
 		deliverPorts: DeliverPorts{
 			HTTP: opts.HTTP, Signer: opts.Signer, URLPolicy: urlPolicy, Clock: clock, TimeoutMs: timeoutMs,
 		},
@@ -182,6 +190,35 @@ func (e *Engine) ProcessMessage(ctx context.Context, m Message) error {
 		return e.dlq(ctx, m, goneAttempt, ReasonEndpointGone)
 	}
 
+	// Rate-limit gate (§10). Checked BEFORE the circuit so a throttle never
+	// mutates circuit state. Throttling reschedules the message without
+	// consuming a delivery attempt -- never drops it, never records an attempt.
+	if endpoint.RateLimit != nil && *endpoint.RateLimit > 0 {
+		now := e.clock.Now()
+		existing, err := e.state.GetRateBucket(ctx, m.Tenant, m.EndpointID)
+		if err != nil {
+			return err
+		}
+		bucket := InitialBucket(*endpoint.RateLimit, now)
+		if existing != nil {
+			bucket = *existing
+		}
+		allowed, next, retryAfterMs := ConsumeToken(bucket, *endpoint.RateLimit, now)
+		if err := e.state.PutRateBucket(ctx, m.Tenant, m.EndpointID, next); err != nil {
+			return err
+		}
+		if !allowed {
+			at := now + retryAfterMs
+			throttled := m
+			throttled.Status = StatusRetrying
+			throttled.NextAttemptAt = &at
+			if err := e.state.PutMessage(ctx, throttled); err != nil {
+				return err
+			}
+			return e.scheduler.ScheduleRetry(ctx, m, at)
+		}
+	}
+
 	// Circuit gate (normalize cooldown to engine config).
 	circuit, err := e.state.GetCircuit(ctx, m.Tenant, m.EndpointID)
 	if err != nil {
@@ -236,7 +273,7 @@ func (e *Engine) ProcessMessage(ctx context.Context, m Message) error {
 			return err
 		}
 		attempt.Outcome = AttemptDelivered
-		return e.state.AppendAttempt(ctx, attempt)
+		return e.record(ctx, attempt)
 	}
 
 	if result.Outcome == OutcomePermanent {
@@ -262,7 +299,7 @@ func (e *Engine) ProcessMessage(ctx context.Context, m Message) error {
 		return e.dlq(ctx, m, attempt, ReasonExhaustedRetries)
 	}
 
-	if err := e.state.AppendAttempt(ctx, attempt); err != nil { // outcome AttemptRetried
+	if err := e.record(ctx, attempt); err != nil { // outcome AttemptRetried
 		return err
 	}
 	at := e.clock.Now() + delay
@@ -283,8 +320,18 @@ func (e *Engine) dlq(ctx context.Context, m Message, attempt Attempt, reason Dlq
 		return err
 	}
 	attempt.Outcome = AttemptDead
-	if err := e.state.AppendAttempt(ctx, attempt); err != nil {
+	if err := e.record(ctx, attempt); err != nil {
 		return err
 	}
 	return e.state.AddToDlq(ctx, m, reason)
+}
+
+// record persists an attempt to the delivery log AND emits it to the
+// telemetry sink (§11). All attempt writes route through here.
+func (e *Engine) record(ctx context.Context, attempt Attempt) error {
+	if err := e.state.AppendAttempt(ctx, attempt); err != nil {
+		return err
+	}
+	e.telemetry.RecordAttempt(attempt)
+	return nil
 }
