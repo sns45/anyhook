@@ -1,5 +1,9 @@
 # anyhook
 
+<p align="center">
+  <img src="assets/marketing/anyhook-poster-1024x1536.png" alt="anyhook: outbound webhooks, delivered. Sign once, fan out, retry, replay. No server, no database, just delivery. Runs on Cloudflare Workers or AWS Lambda." width="420">
+</p>
+
 **Edge-native, open-source outbound webhook delivery engine.** Your product emits a business event once; anyhook signs it ([Standard Webhooks](https://www.standardwebhooks.com)), fans it out to every subscribed customer endpoint, retries transient failures with jittered backoff, circuit-breaks dead endpoints, dead-letters exhausted deliveries, and exposes a delivery log + replay surface — with **no server to operate and no database to provision**.
 
 It runs where your code already runs: **Cloudflare Workers** (Durable Objects + Queues) or **AWS Lambda** (SQS + DynamoDB). The engine is runtime-agnostic; the runtime is a thin adapter.
