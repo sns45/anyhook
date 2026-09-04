@@ -1,13 +1,20 @@
 /** @fileoverview DynamoStateStore behavior against a fake DynamoDB (aws-sdk-client-mock): tenant scoping (G7), circuit optimistic concurrency, idempotency. @module @anyhook/aws (test) */
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { initialCircuit, type Message, type Attempt } from '@anyhook/core';
 import { DynamoStateStore, CircuitWriteConflictError } from '../src/state-dynamo.js';
-import { tenantPk, circuitSk, type Env } from '../src/config.js';
+import { tenantPk, circuitSk, idemSk, type Env } from '../src/config.js';
 import { createFakeDynamo, conditionalCheckFailed } from './fake-dynamo.js';
 
-const { ddbMock, table } = createFakeDynamo();
+const { ddbMock, table, markStale } = createFakeDynamo();
+
+/** GetItem calls this run made against a given SK (unique per test via random ids), for consistency assertions. */
+function getReadsForSk(sk: string) {
+  return ddbMock
+    .commandCalls(GetCommand)
+    .filter((c) => (c.args[0].input.Key as { SK?: string } | undefined)?.SK === sk);
+}
 const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: 'us-east-1' }));
 
 const env: Env = {
@@ -123,6 +130,31 @@ describe('DynamoStateStore: idempotency (conditional PutItem)', () => {
     expect(a).toEqual({ isNew: true, eventId: 'evt_a', messageCount: 0 });
     expect(b).toEqual({ isNew: true, eventId: 'evt_b', messageCount: 0 });
   });
+
+  test('recordEvent: the lost-race read-back uses ConsistentRead (leader read, not a replica)', async () => {
+    const idemKey = `idem_${crypto.randomUUID()}`;
+    await store.recordEvent('tenant-a', 'evt_1', idemKey); // writer A commits the row
+    await store.recordEvent('tenant-a', 'evt_2', idemKey); // writer B loses the condition, reads back
+
+    const readbacks = getReadsForSk(idemSk(idemKey));
+    expect(readbacks.length).toBeGreaterThan(0);
+    expect(readbacks.every((c) => c.args[0].input.ConsistentRead === true)).toBe(true);
+  });
+
+  test('recordEvent: a stale read after a lost race must NOT re-fan-out (ConsistentRead beats replica lag)', async () => {
+    const idemKey = `idem_${crypto.randomUUID()}`;
+    const first = await store.recordEvent('tenant-a', 'evt_a', idemKey);
+    expect(first).toEqual({ isNew: true, eventId: 'evt_a', messageCount: 0 });
+
+    // The idempotency row exists on the leader, but a lagging replica has not caught up yet.
+    markStale(tenantPk('tenant-a'), idemSk(idemKey));
+
+    // Writer B's conditional PutItem fails (the row exists on the leader), then it reads back. A
+    // default read would hit the stale replica, find nothing, and wrongly report isNew:true, a
+    // second fan-out of the same event. ConsistentRead hits the leader and returns the real receipt.
+    const second = await store.recordEvent('tenant-a', 'evt_b', idemKey);
+    expect(second).toEqual({ isNew: false, eventId: 'evt_a', messageCount: 0 });
+  });
 });
 
 describe('DynamoStateStore: messages, attempts, DLQ', () => {
@@ -237,5 +269,19 @@ describe('DynamoStateStore: circuit (optimistic concurrency, D2)', () => {
     const rec = { state: 'closed' as const, consecutiveFailures: 0, cooldownMs: 30_000 };
     await store.putCircuit('tenant-a', 'ep_fresh', rec);
     expect(await store.getCircuit('tenant-a', 'ep_fresh')).toEqual(rec);
+  });
+
+  test('getCircuit reads with ConsistentRead (canAttempt must not gate on a stale breaker state)', async () => {
+    await store.getCircuit('tenant-a', 'ep_cr_get');
+    const reads = getReadsForSk(circuitSk('ep_cr_get'));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.args[0].input.ConsistentRead === true)).toBe(true);
+  });
+
+  test('putCircuit reads the current _version with ConsistentRead (avoid a spurious write conflict)', async () => {
+    await store.putCircuit('tenant-a', 'ep_cr_version', { state: 'closed', consecutiveFailures: 0, cooldownMs: 30_000 });
+    const reads = getReadsForSk(circuitSk('ep_cr_version'));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((c) => c.args[0].input.ConsistentRead === true)).toBe(true);
   });
 });

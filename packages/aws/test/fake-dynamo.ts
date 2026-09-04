@@ -22,6 +22,11 @@ function keyOf(pk: string, sk: string): string {
  */
 export function createFakeDynamo() {
   const table = new Map<string, FakeItem>();
+  // Eventual-consistency knob: keys here are treated as not yet visible to a default (eventually
+  // consistent) GetItem, exactly as a not-yet-caught-up replica would behave. A GetItem carrying
+  // ConsistentRead:true bypasses this and always sees the leader's value. Writes (Put) evaluate their
+  // ConditionExpression against the real table, since DynamoDB checks conditions on the leader.
+  const staleKeys = new Set<string>();
   const ddbMock = mockClient(DynamoDBDocumentClient);
 
   // Split `s` on top-level occurrences of `op` (respecting parentheses).
@@ -114,7 +119,10 @@ export function createFakeDynamo() {
 
   ddbMock.on(GetCommand).callsFake((input) => {
     const key = input.Key as { PK: string; SK: string };
-    return { Item: table.get(keyOf(key.PK, key.SK)) };
+    const k = keyOf(key.PK, key.SK);
+    // Simulate replica lag: a default read of a stale key sees no item; a ConsistentRead sees it.
+    if (staleKeys.has(k) && input.ConsistentRead !== true) return { Item: undefined };
+    return { Item: table.get(k) };
   });
 
   ddbMock.on(QueryCommand).callsFake((input) => {
@@ -160,5 +168,8 @@ export function createFakeDynamo() {
     return {};
   });
 
-  return { ddbMock, table, keyOf };
+  /** Mark a `{PK,SK}` as not yet visible to eventually consistent reads (a lagging replica). */
+  const markStale = (pk: string, sk: string): void => void staleKeys.add(keyOf(pk, sk));
+
+  return { ddbMock, table, keyOf, markStale };
 }
