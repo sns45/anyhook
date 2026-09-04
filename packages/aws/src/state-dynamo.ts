@@ -83,10 +83,18 @@ export class DynamoStateStore implements StateStore {
       return { isNew: true, eventId, messageCount: 0 };
     } catch (e) {
       if (!isConditionalCheckFailed(e)) throw e;
-      // Lost the race: another writer's PutItem committed first. Read it back for the original receipt.
-      const existing = await this.env.ddb.send(new GetCommand({ TableName: this.env.tableName, Key: key }));
+      // Lost the race: another writer's conditional PutItem committed first. The condition is
+      // evaluated on the leader, so a rejection means the row really exists. Read it back for the
+      // original receipt with ConsistentRead so this GetItem also hits the leader: a default,
+      // eventually consistent read can land on a replica that has not yet seen that write, return no
+      // item, and make us report isNew:true, fanning the same event out a SECOND time. That is
+      // DynamoDB's documented default read behaviour on exactly the read that most needs freshness,
+      // not a delete race. (Base table, so ConsistentRead is available; the extra RCU is negligible.)
+      const existing = await this.env.ddb.send(
+        new GetCommand({ TableName: this.env.tableName, Key: key, ConsistentRead: true }),
+      );
       const item = existing.Item as StoredEvent | undefined;
-      if (!item) return { isNew: true, eventId, messageCount: 0 }; // vanishingly unlikely delete race; treat as new
+      if (!item) return { isNew: true, eventId, messageCount: 0 }; // no row even on the leader: treat as new
       return { isNew: false, eventId: item.eventId, messageCount: item.messageCount };
     }
   }
@@ -253,8 +261,10 @@ export class DynamoStateStore implements StateStore {
   // ---- circuit (optimistic concurrency via _version, D2) ----
 
   async getCircuit(tenant: string, endpointId: string): Promise<CircuitRecord> {
+    // ConsistentRead: this gates canAttempt() in the engine. A stale "closed" replica read would let
+    // one extra POST through to an endpoint the breaker has already opened (low stakes, but avoidable).
     const res = await this.env.ddb.send(
-      new GetCommand({ TableName: this.env.tableName, Key: { PK: tenantPk(tenant), SK: circuitSk(endpointId) } }),
+      new GetCommand({ TableName: this.env.tableName, Key: { PK: tenantPk(tenant), SK: circuitSk(endpointId) }, ConsistentRead: true }),
     );
     if (!res.Item) return initialCircuit();
     return stripKeys<CircuitRecord>(res.Item);
@@ -262,7 +272,9 @@ export class DynamoStateStore implements StateStore {
 
   async putCircuit(tenant: string, endpointId: string, rec: CircuitRecord): Promise<void> {
     const key = { PK: tenantPk(tenant), SK: circuitSk(endpointId) };
-    const current = await this.env.ddb.send(new GetCommand({ TableName: this.env.tableName, Key: key }));
+    // ConsistentRead: a stale _version here would fail the conditional put below and throw
+    // CircuitWriteConflictError spuriously (needless SQS redelivery), so read the leader's version.
+    const current = await this.env.ddb.send(new GetCommand({ TableName: this.env.tableName, Key: key, ConsistentRead: true }));
     const expectedVersion = (current.Item as { _version?: number } | undefined)?._version;
     const nextVersion = (expectedVersion ?? 0) + 1;
     try {
