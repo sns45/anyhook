@@ -1,6 +1,6 @@
 {
   "name": "@anyhook/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Runtime-agnostic outbound webhook delivery engine: ports, types, retry/circuit state machine, fan-out, portal handlers",
   "type": "module",
   "main": "./dist/index.js",
